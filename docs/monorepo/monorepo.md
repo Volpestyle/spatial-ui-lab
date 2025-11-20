@@ -42,7 +42,7 @@ Each layer depends downward but is unaware of the specifics above it.
 - **graph-three**: R3F component that renders graphs, applies a controller to the camera, and supports NDC-based node picking.
 - **gesture-core**: Hand landmarks in → `ViewportCommand`s out (rotate, pan, zoom, pointer click).
 - **handtracking-tfjs**: Swappable hand-tracking implementation; no opinions about gestures or rendering.
-- **gesture-react**: React-friendly wrapper that hosts `<video>` and overlay, runs the hand loop, and forwards commands.
+- **gesture-react**: React-friendly wrapper that hosts `<video>` + overlay, runs the hand loop, forwards commands, and lets apps remap cursor space via `mapCursorToViewport`.
 
 ---
 
@@ -62,7 +62,7 @@ Each linked doc covers purpose, public API, internal structure, interactions, an
 ## How Everything Fits (Data Flow)
 
 - **App layer**: Build a graph, create a controller, initialize a hand model, wire `useGestureControl({ model, onCommand })`, and feed clicks/commands into `GraphCanvas`.
-- **Gesture side**: Webcam → video → `HandModel.estimateHands()` → `TrackedHand[]` → `GestureEngine.update()` → `ViewportCommand[]` → controller handles PAN/ROTATE/ZOOM; pointer clicks are stored for the viewer to consume.
+- **Gesture side**: Webcam → video → `HandModel.estimateHands()` → `TrackedHand[]` → `GestureEngine.update()` → `ViewportCommand[]` → controller handles PAN/ROTATE/ZOOM; pointer clicks (after `mapCursorToViewport`) are stored for the viewer to consume.
 - **Rendering side**: Graph + controller → `<GraphCanvas>` → controller applies to camera each frame → nodes/edges rendered → raycast on pointer click (from gestures or mouse) → `onNodeClick`.
 
 ---
@@ -73,7 +73,7 @@ Each linked doc covers purpose, public API, internal structure, interactions, an
 - **control-core**: `ViewportCommand`s + camera controller; no React/gestures.
 - **gesture-core**: Hand landmarks to viewport commands; no TF.js or rendering.
 - **handtracking-tfjs**: Model + webcam plumbing only; no gesture semantics.
-- **graph-three**: R3F graph renderer that consumes a controller and optional gesture click NDC.
+- **graph-three**: R3F graph renderer that consumes a controller and optional normalized gesture clicks (converted to NDC internally).
 - **gesture-react**: React hook that ties DOM elements to gesture-core and handtracking-*.
 
 With this split you can swap models (e.g., Leap Motion), reuse gestures in other 3D apps, or run the graph viewer with mouse/touch-only input.

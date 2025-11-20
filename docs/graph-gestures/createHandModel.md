@@ -1,6 +1,6 @@
-# Gesture Click to 3D Node Selection
+# Gesture Pointer Click to 3D Node Selection
 
-Wire the gesture `CLICK_AT(x, y)` (normalized `[0,1]`) into your Three.js scene so pinch taps hit nodes.
+Wire `ViewportCommand.POINTER_CLICK { xNorm, yNorm }` (normalized `[0,1]`) into your Three.js scene so pinch taps hit nodes.
 
 ---
 
@@ -9,16 +9,16 @@ Pass a normalized device coordinate (NDC) click into the canvas.
 
 ```ts
 // src/graph/graphTypes.ts
-export type GraphCommand =
+export type ViewportCommand =
   | { type: "PAN"; dx: number; dy: number }
   | { type: "ROTATE"; dx: number; dy: number }
   | { type: "ZOOM"; delta: number }
-  | { type: "CLICK_AT"; x: number; y: number };
+  | { type: "POINTER_CLICK"; xNorm: number; yNorm: number };
 
-export type GestureClickNDC = {
-  x: number; // [-1, 1]
-  y: number; // [-1, 1]
-  token: number; // unique id per click
+export type GestureClickNormalized = {
+  xNorm: number; // [0,1], top-left origin
+  yNorm: number;
+  token: number; // increment each click to retrigger effects
 };
 ```
 
@@ -33,14 +33,14 @@ import React from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { GraphController } from "./GraphController";
-import { GraphNode, GraphEdge, GestureClickNDC } from "./graphTypes";
+import { GraphNode, GraphEdge, GestureClickNormalized } from "./graphTypes";
 
 type GraphSceneProps = {
   controller: GraphController;
   nodes: GraphNode[];
   edges: GraphEdge[];
   onClickNode?: (id: string) => void;
-  gestureClick?: GestureClickNDC | null;
+  gestureClick?: GestureClickNormalized | null;
 };
 
 const GraphSceneInner: React.FC<GraphSceneProps> = ({
@@ -62,7 +62,9 @@ const GraphSceneInner: React.FC<GraphSceneProps> = ({
     if (!gestureClick || !onClickNode) return;
 
     const raycaster = raycasterRef.current;
-    raycaster.setFromCamera({ x: gestureClick.x, y: gestureClick.y }, camera);
+    const ndcX = gestureClick.xNorm * 2 - 1;
+    const ndcY = -(gestureClick.yNorm * 2 - 1);
+    raycaster.setFromCamera({ x: ndcX, y: ndcY }, camera);
 
     const meshes = Object.values(nodeRefs.current);
     if (!meshes.length) return;
@@ -101,7 +103,11 @@ const GraphSceneInner: React.FC<GraphSceneProps> = ({
           key={node.id}
           position={node.position}
           ref={(ref) => {
-            if (ref) nodeRefs.current[node.id] = ref;
+            if (ref) {
+              nodeRefs.current[node.id] = ref;
+            } else {
+              delete nodeRefs.current[node.id];
+            }
           }}
           onClick={() => onClickNode?.(node.id)}
         >
@@ -124,14 +130,14 @@ export const GraphCanvas: React.FC<GraphSceneProps> = (props) => (
 ```
 
 Key points:
-- `gestureClick` prop carries NDC and a token so React effects fire per click.
-- Effect raycasts from camera through NDC coords and maps hit mesh → node id.
+- `gestureClick` carries normalized `[0,1]` coordinates and a token so repeated clicks at the same spot still trigger the effect.
+- The scene converts `{ xNorm, yNorm }` to NDC internally before raycasting.
 - Mouse clicks are still supported via `onClick` on the mesh.
 
 ---
 
-## 3. Convert Gesture `CLICK_AT` ([0,1]) → NDC in the App
-Handle the conversion and store a tokened NDC click for the scene to consume.
+## 3. Handle `POINTER_CLICK` commands in the app
+Store normalized clicks and pass them to the canvas; the scene converts to NDC internally.
 
 ```tsx
 // src/App.tsx
@@ -141,8 +147,8 @@ import { GraphController } from "./graph/GraphController";
 import {
   GraphNode,
   GraphEdge,
-  GraphCommand,
-  GestureClickNDC,
+  GestureClickNormalized,
+  ViewportCommand,
 } from "./graph/graphTypes";
 import { useGestureControl } from "./gestures/useGestureControl";
 import { createHandModel } from "./gestures/createHandModel";
@@ -163,7 +169,8 @@ const dummyEdges: GraphEdge[] = [
 export const App: React.FC = () => {
   const controllerRef = React.useRef(new GraphController());
   const [handModel, setHandModel] = React.useState<HandModel | null>(null);
-  const [gestureClick, setGestureClick] = React.useState<GestureClickNDC | null>(null);
+  const [gestureClick, setGestureClick] =
+    React.useState<GestureClickNormalized | null>(null);
   const gestureClickTokenRef = React.useRef(0);
 
   React.useEffect(() => {
@@ -180,13 +187,15 @@ export const App: React.FC = () => {
     };
   }, []);
 
-  const handleCommand = React.useCallback((cmd: GraphCommand) => {
-    if (cmd.type === "CLICK_AT") {
-      const ndcX = cmd.x * 2 - 1;
-      const ndcY = -(cmd.y * 2 - 1);
+  const handleCommand = React.useCallback((cmd: ViewportCommand) => {
+    if (cmd.type === "POINTER_CLICK") {
       const token = ++gestureClickTokenRef.current;
-      setGestureClick({ x: ndcX, y: ndcY, token });
-      return; // do not feed CLICK_AT into camera controls
+      setGestureClick({
+        xNorm: cmd.xNorm,
+        yNorm: cmd.yNorm,
+        token,
+      });
+      return; // clicks are routed to GraphCanvas, not the camera
     }
 
     controllerRef.current.handleCommand(cmd);
@@ -195,6 +204,7 @@ export const App: React.FC = () => {
   const { videoRef, overlayRef } = useGestureControl({
     model: handModel,
     onCommand: handleCommand,
+    mapCursorToViewport: React.useCallback((cursor) => cursor, []),
   });
 
   const handleNodeClick = React.useCallback((id: string) => {
@@ -228,9 +238,9 @@ export const App: React.FC = () => {
 ```
 
 Flow:
-- Gesture engine emits `CLICK_AT` with overlay coords `[0,1]`.
-- App converts to NDC and increments `token` so a new click triggers raycast.
-- `GraphCanvas` raycasts and calls `onClickNode(nodeId)`, same as mouse clicks.
+- Gesture engine emits `POINTER_CLICK` with normalized `[0,1]` coordinates.
+- App stores the normalized click (plus a token) and passes it to `<GraphCanvas>`.
+- `GraphCanvas` converts to NDC, raycasts, and calls `onClickNode(nodeId)` just like mouse clicks.
 
 ---
 

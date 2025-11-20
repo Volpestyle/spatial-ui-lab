@@ -47,7 +47,7 @@ Each `packages/*` directory is a publishable npm package (for example, `@spatial
 ### @spatial-ui-kit/control-core
 
 - Defines the canonical viewport command model.
-- Commands: `PAN { dx, dy }`, `ROTATE { dx, dy }`, `ZOOM { delta }`, `POINTER_CLICK { xNdc, yNdc }`.
+- Commands: `PAN { dx, dy }`, `ROTATE { dx, dy }`, `ZOOM { delta }`, `POINTER_CLICK { xNorm, yNorm }` (normalized `[0,1]`).
 - `OrbitViewportController` applies commands and syncs to a `THREE.PerspectiveCamera`.
 
 ### @spatial-ui-kit/graph-core
@@ -59,7 +59,7 @@ Each `packages/*` directory is a publishable npm package (for example, `@spatial
 ### @spatial-ui-kit/graph-three
 
 - Renders a `Graph` in 3D with Three.js / react-three-fiber via `<GraphCanvas />`.
-- Handles camera updates, node/edge rendering (customizable), and raycasting for mouse and gesture-driven NDC clicks.
+- Handles camera updates, node/edge rendering (customizable), and raycasting for mouse and gesture-driven clicks (it converts `{ xNorm, yNorm }` to NDC internally).
 
 ```ts
 type GraphCanvasProps<N = unknown, E = unknown> = {
@@ -67,7 +67,7 @@ type GraphCanvasProps<N = unknown, E = unknown> = {
   controller: OrbitViewportController;
   onNodeClick?: (node: GraphNode<N>) => void;
   onNodeHover?: (node: GraphNode<N> | null) => void;
-  gestureClickNDC?: { x: number; y: number; token: number };
+  gestureClick?: { xNorm: number; yNorm: number; token: number };
   renderNode?: (node: GraphNode<N>) => React.ReactNode;
   renderEdge?: (edge: GraphEdge<E>) => React.ReactNode;
 };
@@ -99,6 +99,10 @@ type GraphCanvasProps<N = unknown, E = unknown> = {
 type UseGestureControlOptions = {
   model: HandModel | null;
   onCommand: (cmd: ViewportCommand) => void;
+  mapCursorToViewport?: (cursor: { x: number; y: number }) => {
+    x: number;
+    y: number;
+  };
 };
 
 function useGestureControl(options: UseGestureControlOptions): {
@@ -112,6 +116,7 @@ Internally this hook:
 - Starts the webcam via `getUserMedia`.
 - Runs `model.estimateHands(video)` each frame and feeds results to `GestureEngine.update`.
 - Calls `onCommand` with viewport commands.
+- Applies `mapCursorToViewport` (identity by default) before emitting cursor data or POINTER_CLICK so you can remap hand coordinates into a sub-viewport.
 - Draws a 2D cursor/debug overlay on the canvas.
 
 ## Quick start (dev)
@@ -149,6 +154,7 @@ useEffect(() => {
 const { videoRef, overlayRef } = useGestureControl({
   model: handModel,
   onCommand: (cmd) => controller.current.handle(cmd),
+  mapCursorToViewport: (cursor) => cursor,
 });
 ```
 
@@ -194,8 +200,8 @@ export function App() {
   const controllerRef = useRef(new OrbitViewportController());
   const [handModel, setHandModel] = useState<HandModel | null>(null);
   const [gestureClick, setGestureClick] = useState<{
-    x: number;
-    y: number;
+    xNorm: number;
+    yNorm: number;
     token: number;
   } | null>(null);
   const tokenRef = useRef(0);
@@ -213,16 +219,17 @@ export function App() {
   const handleCommand = useCallback((cmd: ViewportCommand) => {
     if (cmd.type === "POINTER_CLICK") {
       const token = ++tokenRef.current;
-      setGestureClick({ x: cmd.xNdc, y: cmd.yNdc, token });
+      setGestureClick({ xNorm: cmd.xNorm, yNorm: cmd.yNorm, token });
       return;
     }
     controllerRef.current.handle(cmd);
   }, []);
 
-  const { videoRef, overlayRef } = useGestureControl({
-    model: handModel,
-    onCommand: handleCommand,
-  });
+const { videoRef, overlayRef } = useGestureControl({
+  model: handModel,
+  onCommand: handleCommand,
+  mapCursorToViewport: React.useCallback((cursor) => cursor, []), // optional: remap to a sub-viewport
+});
 
   return (
     <div style={{ position: "relative", width: "100vw", height: "100vh" }}>
@@ -230,7 +237,7 @@ export function App() {
         graph={graph}
         controller={controllerRef.current}
         onNodeClick={(node: GraphNode) => console.log("Clicked node", node.id)}
-        gestureClickNDC={gestureClick ?? undefined}
+        gestureClick={gestureClick ?? undefined}
       />
 
       <canvas

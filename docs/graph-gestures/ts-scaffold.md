@@ -7,6 +7,8 @@ A gesture-driven 3D node graph scaffold you can adapt to any data source. Includ
 ## 1. Project Structure
 
 ```
+
+> For production, track consecutive pinched/not-pinched frames in `HandState` (or store the last N samples) so single/double pinch modes have hysteresis, and expose a `getDebugState()` helper for HUD overlays.
 src/
   main.tsx            # React entrypoint
   App.tsx             # Root app
@@ -42,12 +44,22 @@ export type GraphEdge = {
 
 export type GraphMode = "normal" | "hotness" | "cluster";
 
-export type GraphCommand =
+export type ViewportCommand =
   | { type: "PAN"; dx: number; dy: number }
   | { type: "ROTATE"; dx: number; dy: number }
   | { type: "ZOOM"; delta: number }
-  | { type: "CLICK_AT"; x: number; y: number }
+  | { type: "POINTER_CLICK"; xNorm: number; yNorm: number }; // normalized [0,1], (0,0)=top-left
+
+// Optionally extend commands at the graph layer.
+export type GraphCommand =
+  | ViewportCommand
   | { type: "SET_MODE"; mode: GraphMode };
+
+export type GestureClickNormalized = {
+  xNorm: number;
+  yNorm: number;
+  token: number;
+};
 ```
 
 ```ts
@@ -146,7 +158,7 @@ Implements single pinch → rotate, double pinch → pan, two-hand pinch → zoo
 ```ts
 // src/gestures/GestureEngine.ts
 import { HandFrame, TrackedHand, Landmark } from "./gestureTypes";
-import { GraphCommand } from "../graph/graphTypes";
+import { ViewportCommand } from "../graph/graphTypes";
 
 type EngineMode = "IDLE" | "ROTATE" | "PAN" | "ZOOM" | "CURSOR";
 
@@ -154,7 +166,7 @@ type HandState = {
   lastCenter?: { x: number; y: number };
   isSinglePinch: boolean;
   isDoublePinch: boolean;
-  pinchActive: boolean; // for tap detection
+  pinchActive: boolean;
   pinchStartTime: number | null;
 };
 
@@ -162,6 +174,11 @@ type GestureEngineOptions = {
   tapMaxDurationMs?: number;
   pinchIndexThreshold?: number;
   pinchMiddleThreshold?: number;
+  rotationSensitivity?: number;
+  panSensitivity?: number;
+  zoomSensitivity?: number;
+  moveDeadzone?: number;
+  zoomDeadzone?: number;
 };
 
 export class GestureEngine {
@@ -187,19 +204,29 @@ export class GestureEngine {
   private readonly tapMaxDurationMs: number;
   private readonly pinchIndexThreshold: number;
   private readonly pinchMiddleThreshold: number;
+  private readonly rotationSensitivity: number;
+  private readonly panSensitivity: number;
+  private readonly zoomSensitivity: number;
+  private readonly moveDeadzone: number;
+  private readonly zoomDeadzone: number;
 
   constructor(opts: GestureEngineOptions = {}) {
     this.tapMaxDurationMs = opts.tapMaxDurationMs ?? 220;
     this.pinchIndexThreshold = opts.pinchIndexThreshold ?? 0.06;
     this.pinchMiddleThreshold = opts.pinchMiddleThreshold ?? 0.07;
+    this.rotationSensitivity = opts.rotationSensitivity ?? 200;
+    this.panSensitivity = opts.panSensitivity ?? 100;
+    this.zoomSensitivity = opts.zoomSensitivity ?? 5;
+    this.moveDeadzone = opts.moveDeadzone ?? 0.0015;
+    this.zoomDeadzone = opts.zoomDeadzone ?? 0.001;
   }
 
   getCursor() {
     return this.cursor;
   }
 
-  update(frame: HandFrame): GraphCommand[] {
-    const commands: GraphCommand[] = [];
+  update(frame: HandFrame): ViewportCommand[] {
+    const commands: ViewportCommand[] = [];
     const { hands, timestamp } = frame;
 
     const left = hands.find((h) => h.handedness === "Left");
@@ -208,7 +235,7 @@ export class GestureEngine {
     if (left) this.updateHandPinches(left, timestamp);
     if (right) this.updateHandPinches(right, timestamp);
 
-    // Two-hand pinch → zoom
+    // Two-hand pinch → zoom (incremental deltas)
     if (left && right && this.isPinching(left) && this.isPinching(right)) {
       const dist = this.distanceBetweenHands(left, right);
       if (this.mode !== "ZOOM") {
@@ -216,8 +243,9 @@ export class GestureEngine {
         this.zoomBaseDistance = dist;
       } else if (this.zoomBaseDistance != null) {
         const delta = dist - this.zoomBaseDistance;
-        const zoomDelta = delta * 5; // sensitivity
-        if (Math.abs(zoomDelta) > 0.001) {
+        this.zoomBaseDistance = dist;
+        const zoomDelta = delta * this.zoomSensitivity;
+        if (Math.abs(zoomDelta) > this.zoomDeadzone) {
           commands.push({ type: "ZOOM", delta: zoomDelta });
         }
       }
@@ -233,48 +261,43 @@ export class GestureEngine {
         const state = this.handStates[primary.handedness];
         const center = this.handCenter(primary);
 
-        // Open point → cursor + pinch tap click
         if (this.isOpenPoint(primary)) {
           this.mode = "CURSOR";
           const indexTip = primary.landmarks[8];
-          this.cursor.x = indexTip.x;
-          this.cursor.y = indexTip.y;
+          this.cursor.x = this.clamp01(indexTip.x);
+          this.cursor.y = this.clamp01(indexTip.y);
 
           const isTap = this.checkPinchTap(primary, state, timestamp);
           if (isTap) {
             commands.push({
-              type: "CLICK_AT",
-              x: this.cursor.x,
-              y: this.cursor.y,
+              type: "POINTER_CLICK",
+              xNorm: this.cursor.x,
+              yNorm: this.cursor.y,
             });
           }
-        } else {
-          const singlePinch = state.isSinglePinch;
-          const doublePinch = state.isDoublePinch;
+          state.lastCenter = undefined;
+        } else if (this.mode !== "CURSOR") {
           const lastCenter = state.lastCenter ?? center;
           const dx = center.x - lastCenter.x;
           const dy = center.y - lastCenter.y;
+          const moveMag = Math.hypot(dx, dy);
 
-          if (doublePinch) {
-            // double pinch drag → pan
+          if (state.isDoublePinch) {
             this.mode = "PAN";
-            const panScale = 100;
-            if (Math.hypot(dx, dy) > 0.001) {
+            if (moveMag > this.moveDeadzone) {
               commands.push({
                 type: "PAN",
-                dx: dx * panScale,
-                dy: dy * panScale,
+                dx: dx * this.panSensitivity,
+                dy: dy * this.panSensitivity,
               });
             }
-          } else if (singlePinch) {
-            // single pinch drag → rotate
+          } else if (state.isSinglePinch) {
             this.mode = "ROTATE";
-            const rotScale = 200;
-            if (Math.hypot(dx, dy) > 0.001) {
+            if (moveMag > this.moveDeadzone) {
               commands.push({
                 type: "ROTATE",
-                dx: dx * rotScale,
-                dy: dy * rotScale,
+                dx: dx * this.rotationSensitivity,
+                dy: dy * this.rotationSensitivity,
               });
             }
           } else if (this.mode !== "CURSOR") {
@@ -282,6 +305,9 @@ export class GestureEngine {
           }
 
           state.lastCenter = center;
+        } else {
+          // exited cursor pose; wait a frame before camera commands resume
+          this.mode = "IDLE";
         }
       } else {
         this.mode = "IDLE";
@@ -310,6 +336,9 @@ export class GestureEngine {
     if (!state.pinchActive && pinchIndex) {
       state.pinchActive = true;
       state.pinchStartTime = timestamp;
+    } else if (!pinchIndex) {
+      state.pinchActive = false;
+      state.pinchStartTime = null;
     }
   }
 
@@ -412,6 +441,10 @@ export class GestureEngine {
     const dy = a.y - b.y;
     return Math.hypot(dx, dy);
   }
+
+  private clamp01(value: number) {
+    return Math.min(1, Math.max(0, value));
+  }
 }
 ```
 
@@ -424,7 +457,7 @@ export class GestureEngine {
 ```ts
 // src/graph/GraphController.ts
 import * as THREE from "three";
-import { GraphCommand } from "./graphTypes";
+import { ViewportCommand } from "./graphTypes";
 
 export class GraphController {
   private radius = 40;
@@ -433,7 +466,7 @@ export class GraphController {
   private panX = 0;
   private panY = 0;
 
-  handleCommand(cmd: GraphCommand) {
+  handleCommand(cmd: ViewportCommand) {
     switch (cmd.type) {
       case "ROTATE":
         this.theta -= cmd.dx * 0.01;
@@ -448,10 +481,8 @@ export class GraphController {
         this.radius *= 1 - cmd.delta * 0.1;
         this.radius = Math.max(5, Math.min(200, this.radius));
         break;
-      case "SET_MODE":
-        break;
-      case "CLICK_AT":
-        break; // handled in App via raycasting
+      case "POINTER_CLICK":
+        break; // clicks are handled by the viewer (raycast)
     }
   }
 
@@ -476,13 +507,14 @@ import React from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { GraphController } from "./GraphController";
-import { GraphNode, GraphEdge } from "./graphTypes";
+import { GraphNode, GraphEdge, GestureClickNormalized } from "./graphTypes";
 
 type GraphSceneProps = {
   controller: GraphController;
   nodes: GraphNode[];
   edges: GraphEdge[];
   onClickNode?: (id: string) => void;
+  gestureClick?: GestureClickNormalized | null;
 };
 
 const GraphSceneInner: React.FC<GraphSceneProps> = ({
@@ -490,13 +522,34 @@ const GraphSceneInner: React.FC<GraphSceneProps> = ({
   nodes,
   edges,
   onClickNode,
+  gestureClick,
 }) => {
   const nodeRefs = React.useRef<Record<string, THREE.Mesh>>({});
+  const raycasterRef = React.useRef(new THREE.Raycaster());
   const { camera } = useThree();
 
   useFrame(() => {
     controller.applyToCamera(camera as THREE.PerspectiveCamera);
   });
+
+  React.useEffect(() => {
+    if (!gestureClick || !onClickNode) return;
+    const raycaster = raycasterRef.current;
+    const ndcX = gestureClick.xNorm * 2 - 1;
+    const ndcY = -(gestureClick.yNorm * 2 - 1);
+    raycaster.setFromCamera({ x: ndcX, y: ndcY }, camera);
+
+    const meshes = Object.values(nodeRefs.current);
+    if (!meshes.length) return;
+    const intersects = raycaster.intersectObjects(meshes, false);
+    if (intersects.length > 0) {
+      const hit = intersects[0].object as THREE.Mesh;
+      const entry = Object.entries(nodeRefs.current).find(
+        ([, mesh]) => mesh === hit
+      );
+      if (entry) onClickNode(entry[0]);
+    }
+  }, [gestureClick, camera, onClickNode]);
 
   return (
     <group>
@@ -523,7 +576,11 @@ const GraphSceneInner: React.FC<GraphSceneProps> = ({
           key={node.id}
           position={node.position}
           ref={(ref) => {
-            if (ref) nodeRefs.current[node.id] = ref;
+            if (ref) {
+              nodeRefs.current[node.id] = ref;
+            } else {
+              delete nodeRefs.current[node.id];
+            }
           }}
           onClick={() => onClickNode?.(node.id)}
         >
@@ -544,6 +601,8 @@ export const GraphCanvas: React.FC<GraphSceneProps> = (props) => (
   </Canvas>
 );
 ```
+
+> For larger graphs, memoize edge geometries instead of rebuilding them inside the render loop so raycasting stays fast.
 
 ---
 
@@ -569,14 +628,19 @@ export function createHandModel(): HandModel {
 
 ## 7. React Wiring
 
-Hook everything together and convert gesture clicks to NDC for raycasting.
+Hook everything together. Gesture clicks stay in `[0,1]` space; `GraphCanvas` converts to NDC internally before raycasting.
 
 ```tsx
 // src/App.tsx
 import React from "react";
 import { GraphCanvas } from "./graph/GraphScene";
 import { GraphController } from "./graph/GraphController";
-import { GraphNode, GraphEdge, GraphCommand } from "./graph/graphTypes";
+import {
+  GraphNode,
+  GraphEdge,
+  GestureClickNormalized,
+  ViewportCommand,
+} from "./graph/graphTypes";
 import { useGestureControl } from "./gestures/useGestureControl";
 import { createHandModel } from "./gestures/createHandModel";
 
@@ -595,18 +659,23 @@ const dummyEdges: GraphEdge[] = [
 export const App: React.FC = () => {
   const controllerRef = React.useRef(new GraphController());
   const [handModel, setHandModel] = React.useState(createHandModel());
+  const [gestureClick, setGestureClick] =
+    React.useState<GestureClickNormalized | null>(null);
+  const gestureClickTokenRef = React.useRef(0);
 
-  const handleCommand = React.useCallback((cmd: GraphCommand) => {
-    controllerRef.current.handleCommand(cmd);
-    if (cmd.type === "CLICK_AT") {
-      console.log("Gesture click at", cmd.x, cmd.y);
-      // convert to NDC and raycast if desired
+  const handleCommand = React.useCallback((cmd: ViewportCommand) => {
+    if (cmd.type === "POINTER_CLICK") {
+      const token = ++gestureClickTokenRef.current;
+      setGestureClick({ xNorm: cmd.xNorm, yNorm: cmd.yNorm, token });
+      return;
     }
+    controllerRef.current.handleCommand(cmd);
   }, []);
 
   const { videoRef, overlayRef } = useGestureControl({
     model: handModel,
     onCommand: handleCommand,
+    mapCursorToViewport: React.useCallback((cursor) => cursor, []), // swap in a custom mapping when the canvas isn't fullscreen
   });
 
   return (
@@ -623,6 +692,7 @@ export const App: React.FC = () => {
         nodes={dummyNodes}
         edges={dummyEdges}
         onClickNode={(id) => console.log("Mouse click node", id)}
+        gestureClick={gestureClick}
       />
 
       <canvas
@@ -665,6 +735,6 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
 ## 8. Next Steps
 
 - Tune thresholds so single vs. double pinch feels crisp.
-- Add raycasting for `CLICK_AT` to select nodes in the 3D graph.
-- Add a small HUD showing current gesture mode (ROTATE / PAN / ZOOM / CURSOR).
+- Wire gesture clicks into your picker (the scaffolded `GraphCanvas` already handles `{ xNorm, yNorm }` → raycast).
+- Add a small HUD showing current gesture mode (ROTATE / PAN / ZOOM / CURSOR) + pinch debug info.
 - Swap `dummyNodes`/`dummyEdges` for your real graph data once the backend exists.

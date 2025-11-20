@@ -1,6 +1,6 @@
 # Gesture Definitions
 
-Webcam → hand landmarks → gesture state machine → `GraphCommand` events → 3D node UI. Here is how to implement that cleanly in the browser.
+Webcam → hand landmarks → gesture state machine → `ViewportCommand` events → 3D node UI. Here is how to implement that cleanly in the browser.
 
 ---
 
@@ -16,12 +16,12 @@ Webcam → hand landmarks → gesture state machine → `GraphCommand` events �
    - Double-hand pinch in/out → zoom
    - Single-hand double pinch drag → pan
    - Open-point + pinch tap → cursor + click
-5. Emit abstract commands to the 3D graph controller:
-   - `ROTATE(dx, dy)`
-   - `PAN(dx, dy)`
-   - `ZOOM(delta)`
-   - `MOVE_CURSOR(x, y)`
-   - `CLICK_AT(x, y)`
+5. Emit abstract commands to the viewport controller:
+   - `ROTATE { dx, dy }`
+   - `PAN { dx, dy }`
+   - `ZOOM { delta }`
+   - `POINTER_CLICK { xNorm, yNorm }`
+   - Continuous cursor data is exposed separately via `GestureEngine.getCursor()` instead of a `MOVE_CURSOR` command.
 
 ---
 
@@ -38,6 +38,28 @@ Webcam → hand landmarks → gesture state machine → `GraphCommand` events �
   - Grab the current video frame.
   - Call `detectForVideo` / `estimateHands`.
   - Receive `hands[]`, each with 21 landmarks and handedness.
+
+## 2.5 Coordinate spaces & cursor mapping
+- Hand landmark coordinates are normalized `[0,1]` with `(0,0)` at the top-left of the captured video. Gesture-core keeps its cursor in this “raw” space.
+- `ViewportCommand.POINTER_CLICK` always reports `{ xNorm, yNorm }` in `[0,1]`. Each renderer converts those normalized coords to its own system (e.g., Three.js NDC) locally:
+
+```ts
+const ndcX = xNorm * 2 - 1;
+const ndcY = -(yNorm * 2 - 1);
+raycaster.setFromCamera({ x: ndcX, y: ndcY }, camera);
+```
+
+- When the webcam feed and the interactive canvas have different aspect ratios (or the app has multiple sub-viewports), add an optional mapping layer in React:
+
+```ts
+useGestureControl({
+  model,
+  onCommand,
+  mapCursorToViewport: ({ x, y }) => warpHandSpaceIntoViewport(x, y),
+});
+```
+
+`gesture-react` applies `mapCursorToViewport` before drawing the overlay or emitting POINTER_CLICK, so downstream consumers always receive viewport-normalized coordinates.
 
 ---
 
@@ -100,7 +122,7 @@ Detection steps:
 4. Exit when double pinch releases for N frames. Give double pinch higher priority than single pinch to avoid flicker.
 
 ### Cursor + click: open point + pinch tap
-Definition: open hand with only index extended moves a 2D cursor; a quick pinch tap triggers a click.
+Definition: open hand with only index extended moves a 2D cursor; a quick pinch tap becomes a pointer click.
 
 Detecting the pose:
 - Consider a finger extended if tip–PIP–MCP bones are nearly colinear.
@@ -127,15 +149,16 @@ function isFingerExtended(hand: TrackedHand, tipIndex: number, pipIndex: number,
 Pose rules:
 - `indexExtended` true, `middle/ring/pinky` false, and no pinch → OPEN POINT.
 - Cursor position = index tip `(x, y)` mapped to canvas size, with smoothing.
-- Quick thumb–index pinch while in OPEN POINT (duration < `TAP_MAX_DURATION`) → `CLICK_AT(x, y)`.
+- Quick thumb–index pinch while in OPEN POINT (duration < `TAP_MAX_DURATION`) → `ViewportCommand.POINTER_CLICK { xNorm, yNorm }`.
+- `GestureEngine.getCursor()` (surfaced via `useGestureControl`) keeps the overlay in sync rather than emitting a `MOVE_CURSOR` command.
 
 ---
 
 ## 4. Glue Code and Architecture
 ### Components / modules
 - **HandTracker**: wraps MediaPipe/TF.js; emits `HandFrame` (hands + timestamp).
-- **GestureEngine**: consumes `HandFrame`, maintains per-hand state, emits `GraphCommand`s.
-- **GraphController**: receives commands, updates camera/cursor, forwards clicks to raycaster.
+- **GestureEngine**: consumes `HandFrame`, maintains per-hand state, emits `ViewportCommand[]`.
+- **GraphController**: receives camera commands (PAN/ROTATE/ZOOM) and ignores clicks; the app forwards `POINTER_CLICK`s to its renderer of choice.
 
 ### Main loop (pseudo-code)
 ```ts
@@ -149,7 +172,15 @@ async function onAnimationFrame(now: number) {
   const commands = gestureEngine.update({ hands, timestamp: now });
 
   for (const cmd of commands) {
-    graphController.handleCommand(cmd);
+    if (cmd.type === "POINTER_CLICK") {
+      gestureClickRef.current = {
+        xNorm: cmd.xNorm,
+        yNorm: cmd.yNorm,
+        token: ++clickToken,
+      };
+    } else {
+      graphController.handleCommand(cmd);
+    }
   }
 
   requestAnimationFrame(onAnimationFrame);
@@ -157,6 +188,7 @@ async function onAnimationFrame(now: number) {
 ```
 - You can run the model at a lower rate (e.g., 15 fps) and interpolate between results.
 - MediaPipe recommends offloading detection to a Web Worker for perf.
+- Graph renderers (graph-three, etc.) convert `{ xNorm, yNorm }` to NDC before raycasting so mouse and gesture clicks share the same code path.
 
 ---
 

@@ -1,0 +1,8 @@
+{
+  "name": "spatial-ui-lab",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "docs:concat": "bash scripts/concat_docs.sh"
+  }
+}
