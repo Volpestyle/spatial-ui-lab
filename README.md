@@ -196,7 +196,8 @@ pnpm install
 2. Run the graph sandbox app
 
 ```bash
-pnpm dev --filter graph-sandbox
+pnpm --filter graph-sandbox dev
+# or use the helper script: pnpm dev:sandbox
 ```
 
 Open the printed URL in your browser. You should see a simple 3D graph you can rotate/zoom with the mouse.

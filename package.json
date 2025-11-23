@@ -9,6 +9,7 @@
   ],
   "scripts": {
     "docs:concat": "bash scripts/concat_docs.sh",
+    "dev:sandbox": "pnpm --filter graph-sandbox dev",
     "build": "pnpm -r run build",
     "clean": "pnpm -r run clean",
     "test": "pnpm -r run test",
