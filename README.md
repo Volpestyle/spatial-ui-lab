@@ -220,12 +220,18 @@ const { videoRef, overlayRef } = useGestureControl({
 });
 ```
 
-Webcam gestures:
+Webcam gestures in the sandbox UI:
 
-- One-hand pinch drag -> rotate.
-- Two-hand pinch -> zoom.
-- One-hand double pinch drag -> pan.
-- Open point + pinch tap -> click on nodes.
+- One-hand pinch drag → rotate.
+- Two-hand pinch → zoom.
+- One-hand double pinch drag → pan.
+- Open point + pinch tap → click on nodes.
+
+Sandbox tips:
+
+- To run dev: `pnpm dev --filter graph-sandbox` (Vite dev server on port 5173 by default).
+- To build/preview: `pnpm build --filter graph-sandbox` then `pnpm --filter graph-sandbox preview`.
+- In the UI, click “Enable gestures” to load the hand model; allow webcam permission. Last clicked node and model status show in the HUD. The video thumb is dimmed in the corner; overlay draws the cursor/debug marker.
 
 ## Minimal usage example
 
