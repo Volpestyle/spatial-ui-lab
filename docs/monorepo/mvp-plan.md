@@ -34,7 +34,7 @@ Central build plan that stitches the per-package v0 plans together. Detailed tas
 - Tasks: implement gesture state machine + helpers; logic tests for rotate/pan/zoom/click; TFJS/MediaPipe wrapper normalizing landmarks; simple mapping test/dev script.
 - Acceptance: unit/logic tests pass; dev script logs normalized landmarks from webcam; gesture engine emits expected commands for synthetic frames.
 
-### Milestone 4 – React glue
+### Milestone 4 – React glue (DONE)
 
 - Package: `@spatial-ui-kit/gesture-react` (`docs/monorepo/v0-plan/gesture-react.md`).
 - Tasks: `useGestureControl` hook per design spec (webcam lifecycle, fps limiting, cursor mapping, overlay, `POINTER_CLICK` remap); cleanup on unmount.
