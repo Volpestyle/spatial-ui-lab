@@ -16,6 +16,14 @@
     "demo:controller": "tsx packages/control-core/demo/rotate.ts",
     "lint": "echo \"Add linting configuration\""
   },
+  "pnpm": {
+    "overrides": {
+      "@react-three/fiber": "8.15.0",
+      "three": "0.161.0",
+      "zustand": "4.4.0",
+      "use-sync-external-store": "1.2.0"
+    }
+  },
   "devDependencies": {
     "@types/node": "^20.11.30",
     "@types/react": "^18.2.0",

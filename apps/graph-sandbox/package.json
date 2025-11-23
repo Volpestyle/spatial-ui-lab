@@ -15,8 +15,10 @@
     "@spatial-ui-kit/gesture-core": "workspace:*",
     "@spatial-ui-kit/gesture-react": "workspace:*",
     "@spatial-ui-kit/handtracking-tfjs": "workspace:*",
-    "@react-three/fiber": "^9.0.0",
-    "three": "^0.161.0",
+    "@react-three/fiber": "8.15.0",
+    "three": "0.161.0",
+    "use-sync-external-store": "1.2.0",
+    "zustand": "4.4.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },
