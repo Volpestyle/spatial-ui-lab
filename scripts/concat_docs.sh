@@ -4,6 +4,8 @@ set -euo pipefail
 
 # Root directory that contains the docs tree.
 DOCS_DIR="docs"
+# Root README to prepend to the output (optional).
+ROOT_README="README.md"
 # Allow overriding the output file via the first CLI argument.
 OUTPUT_FILE="${1:-docs/all-docs.md}"
 
@@ -17,6 +19,10 @@ output_dir=$(dirname "$OUTPUT_FILE")
 [[ "$output_dir" == "." ]] || mkdir -p "$output_dir"
 output_abs=$(cd "$output_dir" && pwd)/$(basename "$OUTPUT_FILE")
 docs_dir_abs=$(cd "$DOCS_DIR" && pwd)
+root_readme_abs=""
+if [[ -f "$ROOT_README" ]]; then
+  root_readme_abs=$(cd "$(dirname "$ROOT_README")" && pwd)/$(basename "$ROOT_README")
+fi
 
 # Gather an ordered list of every regular file under docs, excluding dotfiles.
 doc_files=()
@@ -31,6 +37,16 @@ fi
 
 # Truncate the output file before writing.
 : >"$output_abs"
+
+if [[ -n "$root_readme_abs" ]]; then
+  {
+    printf -- '---\n# %s\n\n' "$(basename "$root_readme_abs")"
+    cat "$root_readme_abs"
+    printf -- '\n\n'
+  } >>"$output_abs"
+else
+  echo "Warning: root README '$ROOT_README' not found; skipping." >&2
+fi
 
 for file in "${doc_files[@]}"; do
   # Skip the output file itself if it already lives under docs.

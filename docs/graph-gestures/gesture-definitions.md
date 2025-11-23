@@ -2,6 +2,8 @@
 
 Webcam → hand landmarks → gesture state machine → `ViewportCommand` events → 3D node UI. Here is how to implement that cleanly in the browser.
 
+> This tutorial mirrors the canonical APIs in the monorepo design specs; use the package types as your source of truth (see `docs/types-index.md`) and treat this as illustrative glue.
+
 ---
 
 ## 1. High-Level Pipeline
@@ -59,7 +61,15 @@ useGestureControl({
 });
 ```
 
-`gesture-react` applies `mapCursorToViewport` before drawing the overlay or emitting POINTER_CLICK, so downstream consumers always receive viewport-normalized coordinates.
+Coordinate cheat sheet:
+
+| Name            | Range  | Origin    | Used by                          |
+| --------------- | ------ | --------- | -------------------------------- |
+| Hand/video      | [0,1]  | Top-left  | gesture-core / HandModel         |
+| Viewport-normal | [0,1]  | Top-left  | gesture-react → app              |
+| WebGL NDC       | [-1,1] | Center, Y flipped | graph-three raycasting     |
+
+`gesture-react` applies `mapCursorToViewport` before drawing the overlay or emitting POINTER_CLICK, so downstream consumers always receive viewport-normalized coordinates (do not remap clicks again).
 
 ---
 
@@ -158,7 +168,7 @@ Pose rules:
 ### Components / modules
 - **HandTracker**: wraps MediaPipe/TF.js; emits `HandFrame` (hands + timestamp).
 - **GestureEngine**: consumes `HandFrame`, maintains per-hand state, emits `ViewportCommand[]`.
-- **GraphController**: receives camera commands (PAN/ROTATE/ZOOM) and ignores clicks; the app forwards `POINTER_CLICK`s to its renderer of choice.
+- **OrbitViewportController**: receives camera commands via `handle(command)` (PAN/ROTATE/ZOOM) and ignores clicks; the app forwards `POINTER_CLICK`s to its renderer of choice.
 
 ### Main loop (pseudo-code)
 ```ts
@@ -179,7 +189,7 @@ async function onAnimationFrame(now: number) {
         token: ++clickToken,
       };
     } else {
-      graphController.handleCommand(cmd);
+      graphController.handle(cmd);
     }
   }
 

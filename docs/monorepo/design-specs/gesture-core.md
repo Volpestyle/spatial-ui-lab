@@ -33,6 +33,9 @@ export interface GestureEngineOptions {
   rotationSensitivity?: number;
   panSensitivity?: number;
   zoomSensitivity?: number;
+  // Advanced smoothing/tuning knobs (optional)
+  moveDeadzone?: number;
+  zoomDeadzone?: number;
 }
 
 // GestureEngine.ts
@@ -54,6 +57,18 @@ export class GestureEngine {
   };
 }
 ```
+
+`GestureEngineOptions` covers the core thresholds/sensitivities and a couple of advanced smoothing knobs (move/zoom deadzones). Treat the deadzones as optional tuning parameters; defaults should be set so callers can ignore them.
+
+### Default values (v0)
+- `tapMaxDurationMs`: 220
+- `pinchIndexThreshold`: 0.06
+- `pinchMiddleThreshold`: 0.07
+- `rotationSensitivity`: 200
+- `panSensitivity`: 100
+- `zoomSensitivity`: 5
+- `moveDeadzone`: 0.0015
+- `zoomDeadzone`: 0.001
 
 ## Gesture Semantics (v1)
 
@@ -95,3 +110,6 @@ packages/gesture-core/src/
 
 - Custom gesture presets via GestureEngineOptions (sensitivity, thresholds).
 - Future: alternative engines (e.g. SimpleGestureEngine, VRGestureEngine).
+
+## Implementation notes
+- Tap detection should track “pinch just released” separately from clearing pinch state. If you clear `pinchActive`/`pinchStartTime` before the click detector runs, a quick pinch-and-release will be invisible to the tap logic. Store `pinchStartTime` and a `pinchJustReleasedAt` timestamp so the click check can compare release time to tapMaxDurationMs before resetting state.

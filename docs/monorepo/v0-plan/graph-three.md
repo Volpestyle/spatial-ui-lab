@@ -20,7 +20,7 @@ Goal v0: `<GraphCanvas>` rendering a toy graph with mouse clicks.
   - Wrap `<Canvas>` from @react-three/fiber
   - Render GraphSceneInner passing props
 - Implement GraphSceneInner
-  - In useFrame, call controller.applyToCamera(camera)
+  - In useFrame, call controller.update(dtSeconds) then applyToCamera(camera)
   - Render edges: map edges to `<line>` segments (or via a simple component)
   - Render nodes:
     - Use renderNode if provided
@@ -35,4 +35,5 @@ Goal v0: `<GraphCanvas>` rendering a toy graph with mouse clicks.
 - Simple tests/smoke checks
   - Type-level test: component accepts generic node/edge data
   - Manual visual test in sandbox app
+  - Smoke test calling controller.update(dt) each frame (should no-op if inertia is off)
 - Export from index.ts

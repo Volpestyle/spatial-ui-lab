@@ -2,53 +2,50 @@
 
 A gesture-driven 3D node graph scaffold you can adapt to any data source. Includes project structure, core types, hand tracking, gesture engine, controller/scene, and React wiring.
 
+> This is an illustrative scaffold; the canonical APIs live in the monorepo design specs and package types (see `docs/types-index.md`). Swap the local mirrors for imports from `@spatial-ui-kit/*` when you implement the real packages.
+> Treat this as the single “demo app” scaffold referenced by the v0 plan; prefer linking back here (or to the design specs) instead of copying the code into other docs.
+
 ---
 
 ## 1. Project Structure
 
-```
-
 > For production, track consecutive pinched/not-pinched frames in `HandState` (or store the last N samples) so single/double pinch modes have hysteresis, and expose a `getDebugState()` helper for HUD overlays.
+
+```
 src/
   main.tsx            # React entrypoint
   App.tsx             # Root app
   graph/
     graphTypes.ts
-    GraphController.ts
+    OrbitViewportController.ts
     GraphScene.tsx
   gestures/
     gestureTypes.ts
     HandTracker.ts
     GestureEngine.ts
     useGestureControl.ts
-    createHandModel.ts # wrapper around MediaPipe/TF.js
+    createTFJSHandModel.ts # stub; swap for @spatial-ui-kit/handtracking-tfjs
 ```
 
 ---
 
 ## 2. Core Types
 
+This scaffold wraps the monorepo `@spatial-ui-kit/graph-core` types so the API lines up with the real packages; swap in the core imports directly when you wire against the published modules. The canonical definitions live with the packages themselves (see `docs/types-index.md`).
+
 ```ts
 // src/graph/graphTypes.ts
-export type GraphNode = {
-  id: string;
-  position: [number, number, number];
-  label?: string;
-};
+import type {
+  GraphNode as CoreGraphNode,
+  GraphEdge as CoreGraphEdge,
+} from "@spatial-ui-kit/graph-core";
+import type { ViewportCommand } from "@spatial-ui-kit/control-core";
 
-export type GraphEdge = {
-  id: string;
-  source: string;
-  target: string;
-};
+// Wrap graph-core types so the scaffold mirrors the monorepo API.
+export type GraphNode = CoreGraphNode<{ label?: string }>;
+export type GraphEdge = CoreGraphEdge<{}>;
 
 export type GraphMode = "normal" | "hotness" | "cluster";
-
-export type ViewportCommand =
-  | { type: "PAN"; dx: number; dy: number }
-  | { type: "ROTATE"; dx: number; dy: number }
-  | { type: "ZOOM"; delta: number }
-  | { type: "POINTER_CLICK"; xNorm: number; yNorm: number }; // normalized [0,1], (0,0)=top-left
 
 // Optionally extend commands at the graph layer.
 export type GraphCommand =
@@ -157,7 +154,7 @@ Implements single pinch → rotate, double pinch → pan, two-hand pinch → zoo
 
 ```ts
 // src/gestures/GestureEngine.ts
-import { HandFrame, TrackedHand, Landmark } from "./gestureTypes";
+import { HandFrame, TrackedHand, Landmark, Handedness } from "./gestureTypes";
 import { ViewportCommand } from "../graph/graphTypes";
 
 type EngineMode = "IDLE" | "ROTATE" | "PAN" | "ZOOM" | "CURSOR";
@@ -168,6 +165,7 @@ type HandState = {
   isDoublePinch: boolean;
   pinchActive: boolean;
   pinchStartTime: number | null;
+  pinchJustReleasedAt: number | null;
 };
 
 type GestureEngineOptions = {
@@ -177,6 +175,7 @@ type GestureEngineOptions = {
   rotationSensitivity?: number;
   panSensitivity?: number;
   zoomSensitivity?: number;
+  // Deadzones are scaffold-only smoothing knobs; keep them internal if the public API stays minimal.
   moveDeadzone?: number;
   zoomDeadzone?: number;
 };
@@ -189,12 +188,14 @@ export class GestureEngine {
       isDoublePinch: false,
       pinchActive: false,
       pinchStartTime: null,
+      pinchJustReleasedAt: null,
     },
     Right: {
       isSinglePinch: false,
       isDoublePinch: false,
       pinchActive: false,
       pinchStartTime: null,
+      pinchJustReleasedAt: null,
     },
   };
 
@@ -223,6 +224,15 @@ export class GestureEngine {
 
   getCursor() {
     return this.cursor;
+  }
+
+  getDebugState(): { mode: EngineMode; primaryHand?: Handedness } {
+    const rightActive = this.handStates.Right.lastCenter != null;
+    const leftActive = this.handStates.Left.lastCenter != null;
+    let primaryHand: Handedness | undefined;
+    if (rightActive) primaryHand = "Right";
+    else if (leftActive) primaryHand = "Left";
+    return { mode: this.mode, primaryHand };
   }
 
   update(frame: HandFrame): ViewportCommand[] {
@@ -333,12 +343,16 @@ export class GestureEngine {
     state.isDoublePinch = pinchIndex && pinchMiddle;
     state.isSinglePinch = pinchIndex && !pinchMiddle;
 
-    if (!state.pinchActive && pinchIndex) {
+    const wasPinching = state.pinchActive;
+    if (!wasPinching && pinchIndex) {
       state.pinchActive = true;
       state.pinchStartTime = timestamp;
+      state.pinchJustReleasedAt = null;
+    } else if (wasPinching && !pinchIndex) {
+      state.pinchActive = false;
+      state.pinchJustReleasedAt = timestamp;
     } else if (!pinchIndex) {
       state.pinchActive = false;
-      state.pinchStartTime = null;
     }
   }
 
@@ -352,9 +366,12 @@ export class GestureEngine {
     const dIndex = this.dist2D(thumbTip, indexTip);
     const pinchIndex = dIndex < this.pinchIndexThreshold;
 
-    if (state.pinchActive && !pinchIndex && state.pinchStartTime != null) {
-      const duration = timestamp - state.pinchStartTime;
-      state.pinchActive = false;
+    if (
+      state.pinchJustReleasedAt != null &&
+      state.pinchStartTime != null
+    ) {
+      const duration = state.pinchJustReleasedAt - state.pinchStartTime;
+      state.pinchJustReleasedAt = null;
       state.pinchStartTime = null;
       return duration <= this.tapMaxDurationMs;
     }
@@ -454,36 +471,129 @@ export class GestureEngine {
 
 ### Camera controller
 
+Supports optional inertia (default off); `update(dt)` is a no-op unless `inertia.enabled === true`. Zoom integrates in log-radius space so inertial zoom feels the same as the multiplicative direct mode.
+
 ```ts
-// src/graph/GraphController.ts
+// src/graph/OrbitViewportController.ts
 import * as THREE from "three";
 import { ViewportCommand } from "./graphTypes";
 
-export class GraphController {
-  private radius = 40;
+type OrbitViewportInertiaConfig = {
+  enabled?: boolean;
+  rotationFriction?: number;
+  panFriction?: number;
+  zoomFriction?: number;
+};
+
+type OrbitViewportConfig = {
+  radius?: number;
+  minRadius?: number;
+  maxRadius?: number;
+  rotationSpeed?: number;
+  panSpeed?: number;
+  zoomSpeed?: number;
+  inertia?: OrbitViewportInertiaConfig;
+};
+
+export class OrbitViewportController {
+  private radius: number;
+  private logRadius: number;
   private theta = 0;
   private phi = Math.PI / 4;
   private panX = 0;
   private panY = 0;
 
-  handleCommand(cmd: ViewportCommand) {
+  private rotVelTheta = 0;
+  private rotVelPhi = 0;
+  private panVelX = 0;
+  private panVelY = 0;
+  private zoomVelLog = 0;
+
+  private readonly rotationSpeed: number;
+  private readonly panSpeed: number;
+  private readonly zoomSpeed: number;
+  private readonly minRadius: number;
+  private readonly maxRadius: number;
+  private readonly minLogRadius: number;
+  private readonly maxLogRadius: number;
+  private readonly inertia: OrbitViewportInertiaConfig;
+
+  constructor(config: OrbitViewportConfig = {}) {
+    this.minRadius = config.minRadius ?? 5;
+    this.maxRadius = config.maxRadius ?? 200;
+    this.radius = this.clampRadius(config.radius ?? 40);
+    this.logRadius = Math.log(this.radius);
+    this.minLogRadius = Math.log(this.minRadius);
+    this.maxLogRadius = Math.log(this.maxRadius);
+    this.rotationSpeed = config.rotationSpeed ?? 0.01;
+    this.panSpeed = config.panSpeed ?? 0.01;
+    this.zoomSpeed = config.zoomSpeed ?? 0.1;
+    this.inertia = config.inertia ?? {};
+  }
+
+  handle(cmd: ViewportCommand) {
+    const inertiaOn = this.inertia.enabled === true;
     switch (cmd.type) {
       case "ROTATE":
-        this.theta -= cmd.dx * 0.01;
-        this.phi -= cmd.dy * 0.01;
-        this.phi = Math.max(0.1, Math.min(Math.PI - 0.1, this.phi));
+        if (inertiaOn) {
+          this.rotVelTheta += -cmd.dx * this.rotationSpeed;
+          this.rotVelPhi += -cmd.dy * this.rotationSpeed;
+        } else {
+          this.theta -= cmd.dx * this.rotationSpeed;
+          this.phi = this.clampPhi(this.phi - cmd.dy * this.rotationSpeed);
+        }
         break;
       case "PAN":
-        this.panX += cmd.dx * 0.01;
-        this.panY += cmd.dy * 0.01;
+        if (inertiaOn) {
+          this.panVelX += cmd.dx * this.panSpeed;
+          this.panVelY += cmd.dy * this.panSpeed;
+        } else {
+          this.panX += cmd.dx * this.panSpeed;
+          this.panY += cmd.dy * this.panSpeed;
+        }
         break;
       case "ZOOM":
-        this.radius *= 1 - cmd.delta * 0.1;
-        this.radius = Math.max(5, Math.min(200, this.radius));
+        if (inertiaOn) {
+          this.zoomVelLog += -cmd.delta * this.zoomSpeed;
+        } else {
+          this.radius = this.clampRadius(
+            this.radius * (1 - cmd.delta * this.zoomSpeed)
+          );
+          this.logRadius = Math.log(this.radius);
+        }
         break;
       case "POINTER_CLICK":
         break; // clicks are handled by the viewer (raycast)
     }
+  }
+
+  update(dtSeconds: number) {
+    if (this.inertia.enabled !== true) return;
+
+    this.theta += this.rotVelTheta * dtSeconds;
+    this.phi = this.clampPhi(this.phi + this.rotVelPhi * dtSeconds);
+    this.panX += this.panVelX * dtSeconds;
+    this.panY += this.panVelY * dtSeconds;
+    this.logRadius = this.clampLogRadius(
+      this.logRadius + this.zoomVelLog * dtSeconds
+    );
+    this.radius = Math.exp(this.logRadius);
+
+    const rotFactor = Math.pow(this.inertia.rotationFriction ?? 0.85, dtSeconds);
+    const panFactor = Math.pow(this.inertia.panFriction ?? 0.8, dtSeconds);
+    const zoomFactor = Math.pow(this.inertia.zoomFriction ?? 0.75, dtSeconds);
+
+    this.rotVelTheta *= rotFactor;
+    this.rotVelPhi *= rotFactor;
+    this.panVelX *= panFactor;
+    this.panVelY *= panFactor;
+    this.zoomVelLog *= zoomFactor;
+
+    if (Math.abs(this.rotVelTheta) < 1e-4) this.rotVelTheta = 0;
+    if (Math.abs(this.rotVelPhi) < 1e-4) this.rotVelPhi = 0;
+    if (Math.abs(this.panVelX) < 1e-4) this.panVelX = 0;
+    if (Math.abs(this.panVelY) < 1e-4) this.panVelY = 0;
+    if (Math.abs(this.zoomVelLog) < 1e-4) this.zoomVelLog = 0;
   }
 
   applyToCamera(camera: THREE.PerspectiveCamera) {
@@ -496,126 +606,58 @@ export class GraphController {
     camera.lookAt(this.panX, this.panY, 0);
     camera.updateProjectionMatrix();
   }
+
+  private clampPhi(value: number) {
+    return Math.max(0.1, Math.min(Math.PI - 0.1, value));
+  }
+
+  private clampRadius(value: number) {
+    return Math.max(this.minRadius, Math.min(this.maxRadius, value));
+  }
+
+  private clampLogRadius(value: number) {
+    return Math.max(this.minLogRadius, Math.min(this.maxLogRadius, value));
+  }
 }
 ```
 
 ### Three.js scene (react-three-fiber)
 
+Prefer `GraphCanvas` from `@spatial-ui-kit/graph-three` for the real app. If you keep a local stub for the scaffold, call it `GraphScene` and only implement the minimal raycast hook; keep the canonical implementation in one place.
+
 ```tsx
-// src/graph/GraphScene.tsx
-import React from "react";
-import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import * as THREE from "three";
-import { GraphController } from "./GraphController";
-import { GraphNode, GraphEdge, GestureClickNormalized } from "./graphTypes";
+// src/graph/GraphScene.tsx (illustrative stub)
+const raycaster = useMemo(() => new THREE.Raycaster(), []);
+useFrame((state) => {
+  controller.update(state.clock.getDelta());
+  controller.applyToCamera(camera as THREE.PerspectiveCamera);
+});
 
-type GraphSceneProps = {
-  controller: GraphController;
-  nodes: GraphNode[];
-  edges: GraphEdge[];
-  onClickNode?: (id: string) => void;
-  gestureClick?: GestureClickNormalized | null;
-};
-
-const GraphSceneInner: React.FC<GraphSceneProps> = ({
-  controller,
-  nodes,
-  edges,
-  onClickNode,
-  gestureClick,
-}) => {
-  const nodeRefs = React.useRef<Record<string, THREE.Mesh>>({});
-  const raycasterRef = React.useRef(new THREE.Raycaster());
-  const { camera } = useThree();
-
-  useFrame(() => {
-    controller.applyToCamera(camera as THREE.PerspectiveCamera);
-  });
-
-  React.useEffect(() => {
-    if (!gestureClick || !onClickNode) return;
-    const raycaster = raycasterRef.current;
-    const ndcX = gestureClick.xNorm * 2 - 1;
-    const ndcY = -(gestureClick.yNorm * 2 - 1);
-    raycaster.setFromCamera({ x: ndcX, y: ndcY }, camera);
-
-    const meshes = Object.values(nodeRefs.current);
-    if (!meshes.length) return;
-    const intersects = raycaster.intersectObjects(meshes, false);
-    if (intersects.length > 0) {
-      const hit = intersects[0].object as THREE.Mesh;
-      const entry = Object.entries(nodeRefs.current).find(
-        ([, mesh]) => mesh === hit
-      );
-      if (entry) onClickNode(entry[0]);
-    }
-  }, [gestureClick, camera, onClickNode]);
-
-  return (
-    <group>
-      {edges.map((edge) => {
-        const source = nodes.find((n) => n.id === edge.source);
-        const target = nodes.find((n) => n.id === edge.target);
-        if (!source || !target) return null;
-
-        const points = [
-          new THREE.Vector3(...source.position),
-          new THREE.Vector3(...target.position),
-        ];
-        const geometry = new THREE.BufferGeometry().setFromPoints(points);
-
-        return (
-          <line key={edge.id} geometry={geometry}>
-            <lineBasicMaterial />
-          </line>
-        );
-      })}
-
-      {nodes.map((node) => (
-        <mesh
-          key={node.id}
-          position={node.position}
-          ref={(ref) => {
-            if (ref) {
-              nodeRefs.current[node.id] = ref;
-            } else {
-              delete nodeRefs.current[node.id];
-            }
-          }}
-          onClick={() => onClickNode?.(node.id)}
-        >
-          <sphereGeometry args={[0.8, 16, 16]} />
-          <meshStandardMaterial />
-        </mesh>
-      ))}
-
-      <ambientLight />
-      <directionalLight position={[10, 10, 10]} />
-    </group>
-  );
-};
-
-export const GraphCanvas: React.FC<GraphSceneProps> = (props) => (
-  <Canvas camera={{ position: [0, 0, 50], fov: 60 }}>
-    <GraphSceneInner {...props} />
-  </Canvas>
-);
+useEffect(() => {
+  if (!gestureClick || !onClickNode) return;
+  const ndcX = gestureClick.xNorm * 2 - 1;
+  const ndcY = -(gestureClick.yNorm * 2 - 1);
+  raycaster.setFromCamera({ x: ndcX, y: ndcY }, camera);
+  const hit = raycaster.intersectObjects(nodeMeshes, false)[0];
+  if (hit) onClickNode(meshIdLookup.get(hit.object));
+}, [gestureClick, camera, onClickNode, nodeMeshes, meshIdLookup, raycaster]);
 ```
 
-> For larger graphs, memoize edge geometries instead of rebuilding them inside the render loop so raycasting stays fast.
+> For the full implementation, see `docs/monorepo/design-specs/graph-three.md` and the canonical package.
+Wrap this in a `<Canvas>` and export `GraphScene` from `graph/GraphScene.tsx`; keep the canonical `GraphCanvas` name reserved for the package export.
 
 ---
 
 ## 6. Hand Model Stub
 
-Replace with MediaPipe/TF.js when ready.
+Replace with MediaPipe/TF.js when ready (in production, import `createTFJSHandModel` from `@spatial-ui-kit/handtracking-tfjs` instead of this stub).
 
 ```ts
-// src/gestures/createHandModel.ts
+// src/gestures/createTFJSHandModel.ts
 import { HandModel } from "./HandTracker";
 import { TrackedHand } from "./gestureTypes";
 
-export function createHandModel(): HandModel {
+export async function createTFJSHandModel(): Promise<HandModel> {
   return {
     async estimateHands(_video: HTMLVideoElement): Promise<TrackedHand[]> {
       return []; // plug in MediaPipe or TF.js here
@@ -628,13 +670,13 @@ export function createHandModel(): HandModel {
 
 ## 7. React Wiring
 
-Hook everything together. Gesture clicks stay in `[0,1]` space; `GraphCanvas` converts to NDC internally before raycasting.
+Hook everything together. `useGestureControl` options mirror the design spec (`model`, `onCommand`, `mapCursorToViewport`, `fps?`, `debug?`). Gesture clicks stay in `[0,1]` space and the hook rewrites `POINTER_CLICK` coordinates using `mapCursorToViewport`, so the local `GraphScene` stub can assume it already receives viewport-normalized values before converting to NDC. In production, swap this stub for `GraphCanvas` from `@spatial-ui-kit/graph-three`.
 
 ```tsx
 // src/App.tsx
 import React from "react";
-import { GraphCanvas } from "./graph/GraphScene";
-import { GraphController } from "./graph/GraphController";
+import { GraphScene } from "./graph/GraphScene";
+import { OrbitViewportController } from "./graph/OrbitViewportController";
 import {
   GraphNode,
   GraphEdge,
@@ -642,26 +684,39 @@ import {
   ViewportCommand,
 } from "./graph/graphTypes";
 import { useGestureControl } from "./gestures/useGestureControl";
-import { createHandModel } from "./gestures/createHandModel";
+import { createTFJSHandModel } from "./gestures/createTFJSHandModel";
+import { HandModel } from "./gestures/HandTracker";
 
 const dummyNodes: GraphNode[] = [
-  { id: "a", position: [-5, 0, 0], label: "A" },
-  { id: "b", position: [5, 0, 0], label: "B" },
-  { id: "c", position: [0, 5, 0], label: "C" },
+  { id: "a", position: [-5, 0, 0], data: { label: "A" } },
+  { id: "b", position: [5, 0, 0], data: { label: "B" } },
+  { id: "c", position: [0, 5, 0], data: { label: "C" } },
 ];
 
 const dummyEdges: GraphEdge[] = [
-  { id: "ab", source: "a", target: "b" },
-  { id: "ac", source: "a", target: "c" },
-  { id: "bc", source: "b", target: "c" },
+  { id: "ab", source: "a", target: "b", data: {} },
+  { id: "ac", source: "a", target: "c", data: {} },
+  { id: "bc", source: "b", target: "c", data: {} },
 ];
 
 export const App: React.FC = () => {
-  const controllerRef = React.useRef(new GraphController());
-  const [handModel, setHandModel] = React.useState(createHandModel());
+  const controllerRef = React.useRef(new OrbitViewportController());
+  const [handModel, setHandModel] = React.useState<HandModel | null>(null);
   const [gestureClick, setGestureClick] =
     React.useState<GestureClickNormalized | null>(null);
   const gestureClickTokenRef = React.useRef(0);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    createTFJSHandModel()
+      .then((model) => {
+        if (!cancelled) setHandModel(model);
+      })
+      .catch((err) => console.error("Failed to init hand model", err));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleCommand = React.useCallback((cmd: ViewportCommand) => {
     if (cmd.type === "POINTER_CLICK") {
@@ -669,13 +724,15 @@ export const App: React.FC = () => {
       setGestureClick({ xNorm: cmd.xNorm, yNorm: cmd.yNorm, token });
       return;
     }
-    controllerRef.current.handleCommand(cmd);
+    controllerRef.current.handle(cmd);
   }, []);
 
   const { videoRef, overlayRef } = useGestureControl({
     model: handModel,
     onCommand: handleCommand,
+    fps: 15, // optional throttling to save CPU
     mapCursorToViewport: React.useCallback((cursor) => cursor, []), // swap in a custom mapping when the canvas isn't fullscreen
+    debug: true, // optional overlay info
   });
 
   return (
@@ -687,7 +744,7 @@ export const App: React.FC = () => {
         background: "#000",
       }}
     >
-      <GraphCanvas
+      <GraphScene
         controller={controllerRef.current}
         nodes={dummyNodes}
         edges={dummyEdges}
@@ -735,6 +792,6 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
 ## 8. Next Steps
 
 - Tune thresholds so single vs. double pinch feels crisp.
-- Wire gesture clicks into your picker (the scaffolded `GraphCanvas` already handles `{ xNorm, yNorm }` → raycast).
+- Wire gesture clicks into your picker (the stubbed `GraphScene` already handles `{ xNorm, yNorm }` → raycast; the canonical version lives in `@spatial-ui-kit/graph-three`).
 - Add a small HUD showing current gesture mode (ROTATE / PAN / ZOOM / CURSOR) + pinch debug info.
 - Swap `dummyNodes`/`dummyEdges` for your real graph data once the backend exists.

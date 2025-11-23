@@ -10,6 +10,7 @@ Goal v0: Working `useGestureControl` hook that drives commands + overlay.
 - Define UseGestureControlOptions + result
   - model: HandModel | null
   - onCommand(cmd: ViewportCommand)
+  - mapCursorToViewport?(cursor) => normalized cursor in viewport space
   - Optional fps, debug
   - Returns { videoRef, overlayRef }
 - Implement OverlayDrawer
@@ -26,8 +27,12 @@ Goal v0: Working `useGestureControl` hook that drives commands + overlay.
     - Call model.estimateHands(video)
     - Create HandFrame with timestamp
     - Call GestureEngine.update(frame) → commands
-    - For each command, call onCommand(cmd)
-    - Draw overlay with OverlayDrawer
+    - Map cursor via mapCursorToViewport (identity default)
+    - For each command:
+      - If POINTER_CLICK, rewrite xNorm/yNorm with mapped cursor then call onCommand
+      - Otherwise, call onCommand(cmd)
+    - Draw overlay with OverlayDrawer using mapped cursor; show debug when enabled
+  - If getUserMedia/model init fails: log error and allow gestures to stay disabled (model null)
   - On cleanup:
     - Stop webcam tracks
     - Cancel loop

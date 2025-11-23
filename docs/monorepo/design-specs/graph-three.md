@@ -48,6 +48,7 @@ export const GraphCanvas: <N, E>(
 
 - Uses @react-three/fiber’s `<Canvas>` under the hood.
 - Each frame:
+  - Calls controller.update(dtSeconds) if present (OrbitViewportController exposes it and no-ops unless inertia is enabled).
   - Calls controller.applyToCamera(camera).
   - Renders:
     - Default node: `<mesh><sphereGeometry /><meshStandardMaterial /></mesh>`
@@ -62,6 +63,9 @@ export const GraphCanvas: <N, E>(
         - ndcY = -(yNorm * 2 - 1)
       - Use Raycaster.setFromCamera({ x: ndcX, y: ndcY }, camera).
       - Intersect node meshes, map back to GraphNode, call onNodeClick.
+- Performance expectations:
+  - Target: small–medium graphs (up to a few thousand nodes/edges) for v0; larger graphs will need LOD/clustering later.
+  - Gestures can run at lower FPS (e.g., 15fps) while the scene renders at full frame rate; smoothing lives in gesture-core/control-core.
 
 ## Internal Structure
 

@@ -48,6 +48,9 @@ Each layer depends downward but is unaware of the specifics above it.
 
 ## Design Docs Index
 
+- Cross-package contracts: `docs/contracts.md`
+- Wiring walkthrough: `docs/monorepo/integration-cookbook.md`
+
 - [@spatial-ui-kit/control-core](design-specs/control-core.md)
 - [@spatial-ui-kit/graph-core](design-specs/graph-core.md)
 - [@spatial-ui-kit/graph-three](design-specs/graph-three.md)
@@ -56,6 +59,8 @@ Each layer depends downward but is unaware of the specifics above it.
 - [@spatial-ui-kit/gesture-react](design-specs/gesture-react.md)
 
 Each linked doc covers purpose, public API, internal structure, interactions, and extensibility notes.
+- Central build plan: `docs/monorepo/mvp-plan.md`.
+- Per-package implementation tasks: `docs/monorepo/v0-plan/*.md`.
 
 ---
 

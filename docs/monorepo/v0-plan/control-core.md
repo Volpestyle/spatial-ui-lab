@@ -13,14 +13,17 @@ Goal v0: Working `ViewportCommand` type and `OrbitViewportController` that can m
     - ROTATE { dx, dy }
     - ZOOM { delta }
     - POINTER_CLICK { xNorm, yNorm }
+  - OrbitViewportConfig: radius, min/max, rotationSpeed, panSpeed, zoomSpeed, inertia config (enabled + friction factors)
 - Implement OrbitViewportController
   - Define OrbitViewportConfig (radius, min/max, speeds)
   - Store internal state: radius, theta, phi, panX, panY
   - handle(cmd: ViewportCommand)
-    - Apply rotation with clamped phi
-    - Apply pan offsets
-    - Apply zoom with clamped radius
+    - Apply rotation with clamped phi (direct mode)
+    - Apply pan offsets (direct mode)
+    - Apply zoom with clamped radius (direct mode)
+    - When inertia.enabled, add impulses to velocities instead of directly mutating position
     - Ignore POINTER_CLICK
+  - update(dtSeconds): no-op unless inertia.enabled; integrate velocities and apply per-axis friction
   - applyToCamera(camera)
     - Convert spherical coords + pan to Cartesian
     - Set camera position & lookAt
@@ -29,4 +32,5 @@ Goal v0: Working `ViewportCommand` type and `OrbitViewportController` that can m
   - ROTATE updates theta/phi
   - PAN updates panX/panY
   - ZOOM obeys min/max radius
+  - Inertia path: update(dt) decays velocities when enabled (smoke test)
 - Export from index.ts
