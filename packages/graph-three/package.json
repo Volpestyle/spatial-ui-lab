@@ -17,11 +17,12 @@
   "scripts": {
     "build": "tsup src/index.ts --dts --format esm,cjs --sourcemap",
     "clean": "rm -rf dist",
-    "test": "echo \"TODO: add tests for graph-three\""
+    "test": "vitest run"
   },
   "peerDependencies": {
     "react": "^18.2.0",
-    "three": "^0.161.0"
+    "three": "^0.161.0",
+    "@react-three/fiber": "^9.0.0"
   },
   "dependencies": {
     "@spatial-ui-kit/control-core": "workspace:*",
@@ -29,8 +30,13 @@
   },
   "devDependencies": {
     "react": "^18.2.0",
+    "react-dom": "^18.2.0",
     "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@react-three/fiber": "9.0.0",
+    "three": "^0.161.0",
     "tsup": "^7.2.0",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "vitest": "^1.6.1"
   }
 }

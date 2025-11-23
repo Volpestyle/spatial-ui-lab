@@ -113,11 +113,16 @@ export class OrbitViewportController {
     const nextLogRadius = logRadius - this.zoomVelocity * dt;
     this.state.radius = clampRadius(Math.exp(nextLogRadius), this.config.minRadius, this.config.maxRadius);
 
-    this.rotationVelocity.theta *= Math.pow(this.config.inertia.rotationFriction, dt);
-    this.rotationVelocity.phi *= Math.pow(this.config.inertia.rotationFriction, dt);
-    this.panVelocity.x *= Math.pow(this.config.inertia.panFriction, dt);
-    this.panVelocity.y *= Math.pow(this.config.inertia.panFriction, dt);
-    this.zoomVelocity *= Math.pow(this.config.inertia.zoomFriction, dt);
+    const inertia = this.config.inertia;
+    const rotationFriction = inertia.rotationFriction ?? DEFAULT_INERTIA.rotationFriction;
+    const panFriction = inertia.panFriction ?? DEFAULT_INERTIA.panFriction;
+    const zoomFriction = inertia.zoomFriction ?? DEFAULT_INERTIA.zoomFriction;
+
+    this.rotationVelocity.theta *= Math.pow(rotationFriction, dt);
+    this.rotationVelocity.phi *= Math.pow(rotationFriction, dt);
+    this.panVelocity.x *= Math.pow(panFriction, dt);
+    this.panVelocity.y *= Math.pow(panFriction, dt);
+    this.zoomVelocity *= Math.pow(zoomFriction, dt);
 
     this.zeroOutTinyVelocities();
   }

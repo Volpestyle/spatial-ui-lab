@@ -22,7 +22,7 @@ Central build plan that stitches the per-package v0 plans together. Detailed tas
 - Tasks: implement `ViewportCommand`, `OrbitViewportController`; graph types/helpers + simple layout if needed.
 - Acceptance: builds + unit tests; script can apply a rotate command and log camera state.
 
-### Milestone 2 – 3D graph renderer
+### Milestone 2 – 3D graph renderer (DONE)
 
 - Package: `@spatial-ui-kit/graph-three` (`docs/monorepo/v0-plan/graph-three.md`).
 - Tasks: React/R3F setup; `GraphCanvas` with `graph: Graph<N,E>` prop; camera application; node/edge rendering; mouse + gesture click raycasting.
