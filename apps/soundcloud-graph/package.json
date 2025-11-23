@@ -1,0 +1,26 @@
+{
+  "name": "soundcloud-graph",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "dev": "echo \"TODO: add dev server for soundcloud-graph\"",
+    "start": "echo \"Use dev script once implemented\""
+  },
+  "dependencies": {
+    "@spatial-ui-kit/control-core": "workspace:*",
+    "@spatial-ui-kit/graph-core": "workspace:*",
+    "@spatial-ui-kit/graph-three": "workspace:*",
+    "@spatial-ui-kit/gesture-core": "workspace:*",
+    "@spatial-ui-kit/gesture-react": "workspace:*",
+    "@spatial-ui-kit/handtracking-tfjs": "workspace:*",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "typescript": "^5.3.0"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "name": "@spatial-ui-kit/control-core",
+  "version": "0.0.1",
+  "private": false,
+  "type": "module",
+  "main": "dist/index.cjs",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup src/index.ts --dts --format esm,cjs --sourcemap",
+    "clean": "rm -rf dist",
+    "test": "echo \"TODO: add tests for control-core\""
+  },
+  "peerDependencies": {
+    "three": "^0.161.0"
+  },
+  "devDependencies": {
+    "three": "^0.161.0",
+    "tsup": "^7.2.0",
+    "typescript": "^5.3.3"
+  }
+}
