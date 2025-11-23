@@ -40,7 +40,7 @@ Central build plan that stitches the per-package v0 plans together. Detailed tas
 - Tasks: `useGestureControl` hook per design spec (webcam lifecycle, fps limiting, cursor mapping, overlay, `POINTER_CLICK` remap); cleanup on unmount.
 - Acceptance: minimal React app logs commands as gestures change and cleans up webcam without crashes.
 
-### Milestone 5 – End-to-end sandbox
+### Milestone 5 – End-to-end sandbox (DONE)
 
 - App: `apps/graph-sandbox` (`docs/monorepo/v0-plan/graph-sandbox.md`).
 - Tasks: Vite (or similar) scaffold; build dummy graph via `graph-core`; wire `GraphCanvas`, controller, `useGestureControl`, `createTFJSHandModel`; gesture-based node selection HUD/logging.
