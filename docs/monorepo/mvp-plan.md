@@ -16,7 +16,7 @@ Central build plan that stitches the per-package v0 plans together. Detailed tas
 - Tasks: workspace package manager config; root TS config; builder/test runner choice; optional lint/format; baseline scripts.
 - Acceptance: `pnpm install` (or chosen PM) works; `pnpm build` runs across packages/apps even if outputs are stubbed (`docs/monorepo/v0-plan/repo.md`).
 
-### Milestone 1 – Core types & camera control
+### Milestone 1 – Core types & camera control (DONE)
 
 - Packages: `@spatial-ui-kit/control-core` (`docs/monorepo/v0-plan/control-core.md`), `@spatial-ui-kit/graph-core` (`docs/monorepo/v0-plan/graph-core.md`).
 - Tasks: implement `ViewportCommand`, `OrbitViewportController`; graph types/helpers + simple layout if needed.

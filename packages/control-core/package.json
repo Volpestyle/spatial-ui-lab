@@ -17,7 +17,7 @@
   "scripts": {
     "build": "tsup src/index.ts --dts --format esm,cjs --sourcemap",
     "clean": "rm -rf dist",
-    "test": "echo \"TODO: add tests for control-core\""
+    "test": "vitest run"
   },
   "peerDependencies": {
     "three": "^0.161.0"

@@ -17,7 +17,7 @@
   "scripts": {
     "build": "tsup src/index.ts --dts --format esm,cjs --sourcemap",
     "clean": "rm -rf dist",
-    "test": "echo \"TODO: add tests for graph-core\""
+    "test": "vitest run"
   },
   "devDependencies": {
     "tsup": "^7.2.0",

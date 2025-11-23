@@ -50,6 +50,9 @@ function mergeConfig(config?: OrbitViewportConfig): Required<OrbitViewportConfig
 export class OrbitViewportController {
   private config: Required<OrbitViewportConfig>;
   private state: OrbitViewportState;
+  private rotationVelocity = { theta: 0, phi: 0 };
+  private panVelocity = { x: 0, y: 0 };
+  private zoomVelocity = 0;
 
   constructor(config?: OrbitViewportConfig) {
     this.config = mergeConfig(config);
@@ -63,6 +66,11 @@ export class OrbitViewportController {
   }
 
   handle(command: ViewportCommand): void {
+    if (this.config.inertia.enabled) {
+      this.handleWithInertia(command);
+      return;
+    }
+
     switch (command.type) {
       case "ROTATE":
         this.state.theta -= command.dx * this.config.rotationSpeed;
@@ -88,10 +96,30 @@ export class OrbitViewportController {
   }
 
   update(_dtSeconds: number): void {
-    // Inertia is not implemented yet; placeholder for future integration.
-    if (this.config.inertia.enabled) {
+    if (!this.config.inertia.enabled) {
       return;
     }
+
+    const dt = _dtSeconds;
+    if (dt <= 0) return;
+
+    this.state.theta += this.rotationVelocity.theta * dt;
+    this.state.phi = clampPhi(this.state.phi + this.rotationVelocity.phi * dt);
+
+    this.state.panX += this.panVelocity.x * dt;
+    this.state.panY += this.panVelocity.y * dt;
+
+    const logRadius = Math.log(this.state.radius);
+    const nextLogRadius = logRadius - this.zoomVelocity * dt;
+    this.state.radius = clampRadius(Math.exp(nextLogRadius), this.config.minRadius, this.config.maxRadius);
+
+    this.rotationVelocity.theta *= Math.pow(this.config.inertia.rotationFriction, dt);
+    this.rotationVelocity.phi *= Math.pow(this.config.inertia.rotationFriction, dt);
+    this.panVelocity.x *= Math.pow(this.config.inertia.panFriction, dt);
+    this.panVelocity.y *= Math.pow(this.config.inertia.panFriction, dt);
+    this.zoomVelocity *= Math.pow(this.config.inertia.zoomFriction, dt);
+
+    this.zeroOutTinyVelocities();
   }
 
   applyToCamera(camera: PerspectiveCameraLike): void {
@@ -107,6 +135,34 @@ export class OrbitViewportController {
 
   getState(): OrbitViewportState {
     return { ...this.state };
+  }
+
+  private handleWithInertia(command: ViewportCommand): void {
+    switch (command.type) {
+      case "ROTATE":
+        this.rotationVelocity.theta -= command.dx * this.config.rotationSpeed;
+        this.rotationVelocity.phi -= command.dy * this.config.rotationSpeed;
+        break;
+      case "PAN":
+        this.panVelocity.x += command.dx * this.config.panSpeed;
+        this.panVelocity.y += command.dy * this.config.panSpeed;
+        break;
+      case "ZOOM":
+        this.zoomVelocity += command.delta * this.config.zoomSpeed;
+        break;
+      case "POINTER_CLICK":
+      default:
+        break;
+    }
+  }
+
+  private zeroOutTinyVelocities(): void {
+    const EPS = 1e-5;
+    if (Math.abs(this.rotationVelocity.theta) < EPS) this.rotationVelocity.theta = 0;
+    if (Math.abs(this.rotationVelocity.phi) < EPS) this.rotationVelocity.phi = 0;
+    if (Math.abs(this.panVelocity.x) < EPS) this.panVelocity.x = 0;
+    if (Math.abs(this.panVelocity.y) < EPS) this.panVelocity.y = 0;
+    if (Math.abs(this.zoomVelocity) < EPS) this.zoomVelocity = 0;
   }
 }
 
