@@ -28,7 +28,7 @@ Central build plan that stitches the per-package v0 plans together. Detailed tas
 - Tasks: React/R3F setup; `GraphCanvas` with `graph: Graph<N,E>` prop; camera application; node/edge rendering; mouse + gesture click raycasting.
 - Acceptance: story/dev demo renders static graph, responds to mouse, and correctly raycasts when `gestureClick` is set manually.
 
-### Milestone 3 – Gesture engine & hand tracking
+### Milestone 3 – Gesture engine & hand tracking (DONE)
 
 - Packages: `@spatial-ui-kit/gesture-core` (`docs/monorepo/v0-plan/gesture-core.md`), `@spatial-ui-kit/handtracking-tfjs` (`docs/monorepo/v0-plan/handtracking-tfjs.md`).
 - Tasks: implement gesture state machine + helpers; logic tests for rotate/pan/zoom/click; TFJS/MediaPipe wrapper normalizing landmarks; simple mapping test/dev script.
