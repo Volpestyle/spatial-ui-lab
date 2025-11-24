@@ -19,6 +19,12 @@ export interface OrbitViewportConfig {
   panSpeed?: number;
   zoomSpeed?: number;
   inertia?: OrbitViewportInertiaConfig;
+  /**
+   * When true, clamp vertical rotation to avoid flipping over the poles.
+   * Set to false to allow upside-down views.
+   * Default: true
+   */
+  clampVertical?: boolean;
 }
 
 export interface OrbitViewportState {

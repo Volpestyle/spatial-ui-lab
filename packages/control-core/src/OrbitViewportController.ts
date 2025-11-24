@@ -25,6 +25,7 @@ const DEFAULT_CONFIG: Required<OrbitViewportConfig> = {
   panSpeed: 0.01,
   zoomSpeed: 0.1,
   inertia: DEFAULT_INERTIA,
+  clampVertical: true,
 };
 
 function clampPhi(phi: number): number {
@@ -74,7 +75,8 @@ export class OrbitViewportController {
     switch (command.type) {
       case "ROTATE":
         this.state.theta -= command.dx * this.config.rotationSpeed;
-        this.state.phi = clampPhi(this.state.phi - command.dy * this.config.rotationSpeed);
+        const nextPhi = this.state.phi - command.dy * this.config.rotationSpeed;
+        this.state.phi = this.config.clampVertical ? clampPhi(nextPhi) : nextPhi;
         break;
       case "PAN":
         this.state.panX += command.dx * this.config.panSpeed;
@@ -104,7 +106,8 @@ export class OrbitViewportController {
     if (dt <= 0) return;
 
     this.state.theta += this.rotationVelocity.theta * dt;
-    this.state.phi = clampPhi(this.state.phi + this.rotationVelocity.phi * dt);
+    const nextPhi = this.state.phi + this.rotationVelocity.phi * dt;
+    this.state.phi = this.config.clampVertical ? clampPhi(nextPhi) : nextPhi;
 
     this.state.panX += this.panVelocity.x * dt;
     this.state.panY += this.panVelocity.y * dt;

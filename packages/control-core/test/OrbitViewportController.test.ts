@@ -46,4 +46,11 @@ describe("OrbitViewportController (inertia)", () => {
     expect(state.panY).toBeCloseTo(-2);
     expect(state.radius).toBeLessThan(40);
   });
+
+  it("allows upside-down when clampVertical is false", () => {
+    const controller = new OrbitViewportController({ rotationSpeed: 1, clampVertical: false });
+    controller.handle({ type: "ROTATE", dx: 0, dy: -Math.PI * 2 });
+    const state = controller.getState();
+    expect(state.phi).toBeGreaterThan(Math.PI);
+  });
 });
